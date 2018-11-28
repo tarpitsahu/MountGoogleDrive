@@ -8,6 +8,8 @@ from oauth2client import file, client, tools
 import time
 import os
 import sys
+import magic
+import shutil
 import errno
 import random
 import datetime
@@ -20,7 +22,7 @@ from fuse import FUSE, FuseOSError, Operations
 
 CURRENT_PARENT_ID="root"
 root_folder=".backend"
-
+Dict={}
 SCOPES = 'https://www.googleapis.com/auth/drive'
 store = file.Storage('token.json')
 creds = store.get()
@@ -69,6 +71,7 @@ class Passthrough(Operations):
 				for item in items:
 					try:
 						print "Name : ",item['name'],"\nId : ",item['id'],"\n"
+						Dict[item['id']]=90
 						if item['mimeType']=="application/vnd.google-apps.folder":
 							os.mkdir(full_path+"/"+item['name']) 
 						else:
@@ -149,10 +152,30 @@ class Passthrough(Operations):
 	def rmdir(self, path):
 		print "rmdir called : ",path
 		full_path = self._full_path(path)
+		req_id=self.getidfrompath(full_path)
+		service.files().delete(fileId=req_id).execute()
 		return os.rmdir(full_path)
 
 	def mkdir(self, path, mode):
 		print "mkdir called : ",path
+		global service
+		
+		full_path = self._full_path(path)
+		full_path=full_path.rstrip('/')
+		fp=full_path.split("/")
+		
+		fplen=len(fp)
+		filename=fp[fplen-1]
+		
+		temppath=""
+		for i in range(0,fplen-1):
+			temppath=temppath+fp[i]+"/"
+
+		req_id=self.getidfrompath(temppath.rstrip('/'))
+
+		file_metadata ={'name' : filename,'mimeType' : 'application/vnd.google-apps.folder','parents':[req_id]}
+		file = service.files().create(body=file_metadata,fields='id').execute()
+		print "mkdir called"
 		return os.mkdir(self._full_path(path), mode)
 
 	def statfs(self, path):
@@ -171,9 +194,80 @@ class Passthrough(Operations):
 		print "symlink called : ",path
 		return os.symlink(name, self._full_path(target))
 
+	def trim(self, path):
+		l = len(path)
+		i=0
+		for i in range(l-1,0,-1):
+			if(path[i]=='/'):
+				break
+		return i
+
 	def rename(self, old, new):
-		print "rename called : ",path
-		return os.rename(self._full_path(old), self._full_path(new))
+		print "~~~~~~ rename called : ",old
+		print "~~~~~~ rename called : ",new
+		old_path = self._full_path(old)
+		new_path = self._full_path(new)
+		x = self.trim(old_path)
+		y = self.trim(new_path)
+		old_name = old_path[x+1:]
+		new_name = new_path[y+1:]
+		print "~~~~~~~~~~~~~~~~~~~~~~~~~~"
+		print old_path
+		print new_path
+		print old_name
+		print new_name
+		print "~~~~~~~~~~~~~~~~~~~~~~~~~~"
+		parent = new_path[:y]
+		print "parent ::  ",parent
+		
+		if('.Trash-' in new):
+			print "Deletion Called"
+			try:	
+				#type(recordtomodify)
+				full_path = self._full_path(old)
+				file_id = self.getidfrompath(full_path)
+				service.files().delete(fileId=file_id).execute()
+			except Exception as e:
+				print e
+			return ""
+
+		elif(old_name == new_name):
+			try:
+				print "move called"
+				print "old_path ::",old_path
+				print "new_path ::",new_path
+				print "old_name ::",old_name
+				print "new name ::",new_name
+				print "parent :: ",parent
+				file_id = self.getidfrompath(old_path)
+				parent_id = self.getidfrompath(parent)
+				updated_file = service.files().update(fileId=str(file_id), addParents=str(parent_id)).execute()
+				print "moved..."
+			except Exception as e:
+				print e
+			return os.rename(self._full_path(old_path), self._full_path(new_path))
+
+		else:
+			#new = new[1::]
+			print "~~~~~~ rename called : ",old
+			print "~~~~~~ rename called : ",new
+			try:
+				full_path = self._full_path(old)
+				file_id = self.getidfrompath(full_path)
+				file_id = str(file_id)
+				file = service.files().get(fileId=file_id).execute()
+				file = {'name': new}
+				print "22"
+				print "file id : ", file_id
+				# Rename the file.
+				updated_file = service.files().update(fileId=file_id, body=file, fields='name').execute()
+				print "33"
+			except errors.HttpError, error:
+				print 'An error occurred: %s' % error
+
+			print "44"
+			os.rename(self._full_path(old), self._full_path(new))
+			return os.rename(self._full_path(old), self._full_path(new))
 
 	def link(self, target, name):
 		print "link called : ",path
@@ -181,15 +275,63 @@ class Passthrough(Operations):
 
 	def utimens(self, path, times=None):
 		print "utimens called : ",path
+		global service
+		full_path = self._full_path(path)
+		full_path=full_path.rstrip('/')
+		full_path=full_path.replace('Google Drive','.backend')
+		fp=full_path.split("/")
+		
+		fplen=len(fp)
+		filename=fp[fplen-1]
+		
+		temppath=""
+		for i in range(0,fplen-1):
+			temppath=temppath+fp[i]+"/"
+
+		req_id=self.getidfrompath(temppath.rstrip('/'))
+		print "$$$$$$$$$$$$$$$$$$$", req_id
+		if('trashinfo' not in full_path):
+			try:
+				body = {'name': filename , 'parents':[req_id]}
+				media_body = MediaFileUpload(full_path)
+				print "Media Body : ",full_path
+				time.sleep(5)
+				fiahl = service.files().create(body=body, media_body=media_body).execute()
+			except Exception as e:
+				print e
+
+		
+
+
+
+
 		return os.utime(self._full_path(path), times)
 
 	# File methods
 	# ============
 
 	def open(self, path, flags):
-		print "open called : ",path
-		full_path = self._full_path(path)
-		return os.open(full_path, flags)
+			print "open called : ",path
+			full_path = self._full_path(path)
+			print full_path
+			myid=self.getidfrompath(full_path)
+			if(Dict[myid]==90):
+
+					Dict[myid]=999
+
+					print Dict[myid]
+
+					request = service.files().get_media(fileId=myid)
+					fh = io.BytesIO()
+					fh = io.FileIO(full_path, 'wb')
+					downloader = MediaIoBaseDownload(fh, request)
+					done = False
+					while done is False:
+							status, done = downloader.next_chunk()
+							print "Download %d%%." % int(status.progress() * 100)
+					print"uioyr.....",id
+					return
+			return os.open(full_path, flags)
 
 	def create(self, path, mode, fi=None):
 		print "create called : ",path
@@ -222,6 +364,38 @@ class Passthrough(Operations):
 
 	def fsync(self, path, fdatasync, fh):
 		print "fsync called : ",path
+		try:
+
+		# First retrieve the file from the API.
+					global service
+					full_path = self._full_path(path)
+					print "0000000000000000000000000000",full_path
+
+					file_id=self.getidfrompath(full_path)
+					print file_id
+					filname=full_path.split('/')
+					l=len(filname)
+					new_filename=full_path
+					print new_filename
+					file = service.files().get(fileId=file_id).execute()
+
+					# File's new content.
+					mime = magic.Magic(mime=True)
+					new_mime_type=mime.from_file(full_path)
+
+					media_body = MediaFileUpload(
+					new_filename, mimetype=new_mime_type, resumable=True)
+
+					# Send the request to the API.
+					fiahl = service.files().update(fileId=file_id,media_body=media_body).execute()
+					return
+					# updated_file = service.files().update(
+					# fileId=file_id,
+					# body=file,
+					# media_body=media_body).execute()
+		except Exception as e:
+			print e
+		       
 		return self.flush(path, fh)
 
 	def getidfrompath(self,path):
