@@ -218,6 +218,7 @@ class Passthrough(Operations):
 		print new_name
 		print "~~~~~~~~~~~~~~~~~~~~~~~~~~"
 		parent = new_path[:y]
+		old_parent = old_path[:x]
 		print "parent ::  ",parent
 		
 		if('.Trash-' in new):
@@ -229,34 +230,32 @@ class Passthrough(Operations):
 				service.files().delete(fileId=file_id).execute()
 			except Exception as e:
 				print e
-			return ""
+			return shutil.rmtree(str(old_path))
 
 		elif(old_name == new_name):
 			try:
+				print "~~~~~~~~~~~~~~~~~~~~~~~~~~"
 				print "move called"
-				print "old_path ::",old_path
-				print "new_path ::",new_path
-				print "old_name ::",old_name
-				print "new name ::",new_name
 				print "parent :: ",parent
+				print "~~~~~~~~~~~~~~~~~~~~~~~~~~"
 				file_id = self.getidfrompath(old_path)
 				parent_id = self.getidfrompath(parent)
-				updated_file = service.files().update(fileId=str(file_id), addParents=str(parent_id)).execute()
+				old_parent_id = self.getidfrompath(old_parent)
+				updated_file = service.files().update(fileId=str(file_id), addParents=str(parent_id), removeParents=str(old_parent_id)).execute()
+				
 				print "moved..."
 			except Exception as e:
 				print e
-			return os.rename(self._full_path(old_path), self._full_path(new_path))
-
+			return os.rename(str(old_path), str(new_path))
 		else:
 			#new = new[1::]
-			print "~~~~~~ rename called : ",old
-			print "~~~~~~ rename called : ",new
+			
 			try:
-				full_path = self._full_path(old)
-				file_id = self.getidfrompath(full_path)
+				
+				file_id = self.getidfrompath(old_path)
 				file_id = str(file_id)
 				file = service.files().get(fileId=file_id).execute()
-				file = {'name': new}
+				file = {'name': new_name}
 				print "22"
 				print "file id : ", file_id
 				# Rename the file.
@@ -266,8 +265,8 @@ class Passthrough(Operations):
 				print 'An error occurred: %s' % error
 
 			print "44"
-			os.rename(self._full_path(old), self._full_path(new))
-			return os.rename(self._full_path(old), self._full_path(new))
+			
+			return os.rename(str(old_path), str(new_path))
 
 	def link(self, target, name):
 		print "link called : ",path
@@ -415,6 +414,8 @@ class Passthrough(Operations):
 			print "getidfrompath",e
 
 def main(mountpoint):
+	shutil.rmtree(".backend")
+	os.mkdir(".backend")
 	FUSE(Passthrough(root_folder), mountpoint, nothreads=True, foreground=True)
 
 if __name__ == '__main__':
